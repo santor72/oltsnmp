@@ -1,0 +1,6 @@
+Value EQUIPMENT_ID (.+)
+Value MODEL (.+)
+
+Start
+  ^Equipment\s+ID:\s+${EQUIPMENT_ID} -> Continue
+  ^Model:\s+${MODEL} -> Record

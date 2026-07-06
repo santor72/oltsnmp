@@ -1,0 +1,7 @@
+Value ROW (\d+)
+Value AUTHPASS_TIME (\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})
+Value OFFLINE_TIME (\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}|0{4}-0{2}-0{2}\s+0{2}:0{2}:0{2})
+Value CAUSE (\S*)
+
+Start
+  ^\s*${ROW}\s+${AUTHPASS_TIME}\s+${OFFLINE_TIME}(?:\s+${CAUSE})?\s*$$ -> Record

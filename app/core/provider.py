@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+from app.models import ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery
+
+
+class VendorProvider(Protocol):
+    @property
+    def vendor_tags(self) -> tuple[str, ...]: ...
+
+    @property
+    def default_cli_fallback_access(self) -> str: ...
+
+    async def get_onu(self, query: ONUQuery) -> ONUCustomerInfo: ...
+
+    async def get_onus(self, olt_ip: str, board_id: int, pon_id: int) -> list[ONUInfoPerBoard]: ...
+
+    async def get_onus_new(self, olt_ip: str, board_id: int, pon_id: int) -> list[ONUInfoPerBoard]: ...
+
+    async def get_onu_cli(self, query: ONUQuery, access: str) -> ONUCLIInfo: ...

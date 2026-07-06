@@ -1,0 +1,8 @@
+Value ONU_INDEX (\S+)
+Value ADMIN_STATE (\S+)
+Value OMCC_STATE (\S+)
+Value PHASE_STATE (\S+)
+Value CHANNEL (\S+)
+
+Start
+  ^${ONU_INDEX}\s+${ADMIN_STATE}\s+${OMCC_STATE}\s+${PHASE_STATE}\s+${CHANNEL}\s*$$ -> Record

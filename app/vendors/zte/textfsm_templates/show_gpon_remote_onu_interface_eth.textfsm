@@ -1,0 +1,10 @@
+Value INTERFACE (.+)
+Value SPEED_STATUS (.+)
+Value OPERATE_STATUS (.+)
+Value ADMIN_STATUS (.+)
+
+Start
+  ^Interface\s+:\s+${INTERFACE} -> Continue
+  ^Speed\s+status\s+:\s+${SPEED_STATUS} -> Continue
+  ^Operate\s+status\s+:\s+${OPERATE_STATUS} -> Continue
+  ^Admin\s+status\s+:\s+${ADMIN_STATUS} -> Record

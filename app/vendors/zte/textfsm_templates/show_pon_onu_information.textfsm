@@ -1,0 +1,20 @@
+Value INTERFACE (.+)
+Value AUTH_INFORMATION (.+)
+Value SN_REPORTED (.+)
+Value REPORTED_ONU_ID (.+)
+Value ONU_TYPE_CONFIGURED (.+)
+Value ONU_TYPE_REPORTED (.+)
+Value STATE (.+)
+Value HARDWARE_VERSION (.+)
+Value SOFTWARE_VERSION (.+)
+
+Start
+  ^ONU\s+interface:\s+${INTERFACE} -> Continue
+  ^Auth\s+information:\s+${AUTH_INFORMATION} -> Continue
+  ^SN\s+reported:\s+${SN_REPORTED} -> Continue
+  ^ONU\s+ID:\s+${REPORTED_ONU_ID} -> Continue
+  ^ONU\s+type\s+configured:\s+${ONU_TYPE_CONFIGURED} -> Continue
+  ^ONU\s+type\s+reported:\s+${ONU_TYPE_REPORTED} -> Continue
+  ^State\s+:\s+${STATE} -> Continue
+  ^Hardware\s+version:\s+${HARDWARE_VERSION} -> Continue
+  ^Software\s+version:\s+${SOFTWARE_VERSION} -> Record

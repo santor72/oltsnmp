@@ -1,0 +1,48 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: zte-olt-fastapi
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PYTHONPATH: /app
+    ports:
+      - "${FASTAPI_PORT:-8000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+  redis:
+    image: redis:7.2-alpine
+    container_name: zte-olt-fastapi-redis
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -lc
+      - |
+        if [ -n "${REDIS_PASSWORD:-}" ]; then
+          exec redis-server --appendonly yes --requirepass "${REDIS_PASSWORD}"
+        fi
+        exec redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - |
+          if [ -n "${REDIS_PASSWORD:-}" ]; then
+            redis-cli -a "${REDIS_PASSWORD}" ping
+          else
+            redis-cli ping
+          fi
+      interval: 10s
+      timeout: 3s
+      retries: 5

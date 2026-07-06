@@ -1,0 +1,5 @@
+Value ONU (\S+)
+Value RX_POWER (-?\d+\.\d+)
+
+Start
+  ^${ONU}\s+${RX_POWER}\(dbm\)\s*$$ -> Record
