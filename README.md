@@ -1,6 +1,6 @@
-# ZTE OLT FastAPI Service
-
-Python/FastAPI сервис для опроса OLT и ONU. Исходно был сделан как перенос логики из Go-функций `GetByBoardIDPonIDAndOnuID`, `GetByBoardIDAndPonID` и оптимизированного варианта `GetByBoardIDAndPonIDNew`, затем был расширен CLI-опросом, кешем, auto-detect vendor и vendor/inventory архитектурой.
+# OLT FastAPI Service
+Идея заимствована из https://github.com/Cepat-Kilat-Teknologi/snmp-olt-zte
+Python/FastAPI сервис для опроса OLT и ONU. Исходно был сделан как перенос логики из Cepat-Kilat-Teknologi/snmp-olt-zte `GetByBoardIDPonIDAndOnuID`, `GetByBoardIDAndPonID` и оптимизированного варианта `GetByBoardIDAndPonIDNew`, затем был расширен CLI-опросом, кешем, auto-detect vendor и vendor/inventory архитектурой.
 
 Сейчас сервис умеет:
 - получать детальную информацию по одной ONU по SNMP;
