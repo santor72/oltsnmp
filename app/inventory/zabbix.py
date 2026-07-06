@@ -101,14 +101,17 @@ class ZabbixInventory:
                     note="zabbix host.get returned empty result",
                 )
 
-            tags = list(hosts[0].get("inheritedTags", [])) + list(hosts[0].get("tags", []))
-            self._debug("zabbix combined tags", olt_ip=olt_ip, tags=tags)
-            for tag in tags:
-                if str(tag.get("tag", "")).strip().lower() != "vendor":
-                    continue
-                value = str(tag.get("value", "")).strip()
-                if not value:
-                    continue
+            tags = self._collect_vendor_values(list(hosts[0].get("tags", [])))
+            inherited_tags = self._collect_vendor_values(list(hosts[0].get("inheritedTags", [])))
+            candidate_values = tags + inherited_tags
+            self._debug(
+                "zabbix combined tags",
+                olt_ip=olt_ip,
+                tags=tags,
+                inherited_tags=inherited_tags,
+                candidates=candidate_values,
+            )
+            for value in candidate_values:
                 try:
                     matched_vendor = self.registry.get(value).vendor
                     self._debug(
@@ -161,3 +164,12 @@ class ZabbixInventory:
         if not self.debug:
             return
         logger.warning("zabbix_inventory: %s | %s", message, data)
+
+    @staticmethod
+    def _collect_vendor_values(tags: list[dict[str, Any]]) -> list[str]:
+        values = [
+            str(tag.get("value", "")).strip()
+            for tag in tags
+            if str(tag.get("tag", "")).strip().lower() == "vendor" and str(tag.get("value", "")).strip()
+        ]
+        return sorted(values, key=len, reverse=True)

@@ -8,7 +8,7 @@ from app.inventory.zabbix import ZabbixInventory
 
 
 class FakeProvider:
-    vendor_tags = ("zte", "zteolt-2.1")
+    vendor_tags = ("zte", "zte-olt", "zteolt-2.1")
     default_cli_fallback_access = "telnet"
 
     async def get_onu(self, query):  # pragma: no cover
@@ -44,8 +44,8 @@ class FakeZabbixAPI:
                 "hostid": "10839",
                 "host": "OLT_Petrovskoe",
                 "name": "OLT_Petrovskoe",
+                "tags": [{"tag": "vendor", "value": "zte"}, {"tag": "vendor", "value": "zte-olt"}],
                 "inheritedTags": [{"tag": "vendor", "value": "zteolt-2.1"}],
-                "tags": [],
             }]
         return []
 
@@ -67,7 +67,7 @@ class ZabbixInventoryTest(unittest.IsolatedAsyncioTestCase):
         result = await inventory.lookup_vendor("10.5.0.21")
         self.assertEqual(result.source, "zabbix")
         self.assertEqual(result.matched_vendor, "zte")
-        self.assertEqual(result.vendor_tag, "zteolt-2.1")
+        self.assertEqual(result.vendor_tag, "zte-olt")
 
     async def test_lookup_miss(self) -> None:
         inventory = ZabbixInventory(
