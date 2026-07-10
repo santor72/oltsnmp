@@ -99,7 +99,7 @@ curl "http://127.0.0.1:8000/onudebug?olt_ip=10.5.0.21&port=1/2/10&onu_id=46"
 Пример:
 
 ```bash
-curl "http://127.0.0.1:8000/onus?olt_ip=10.5.0.21&board_id=1&pon_id=1"
+curl "http://127.0.0.1:8000/onus?olt_ip=10.5.0.21&port=gpon-olt_1/1/1"
 ```
 
 ### `/onus-new`
@@ -109,7 +109,7 @@ curl "http://127.0.0.1:8000/onus?olt_ip=10.5.0.21&board_id=1&pon_id=1"
 Пример:
 
 ```bash
-curl "http://127.0.0.1:8000/onus-new?olt_ip=10.5.0.21&board_id=1&pon_id=1"
+curl "http://127.0.0.1:8000/onus-new?olt_ip=10.5.0.21&port=gpon-olt_1/1/1"
 ```
 
 Разница с `/onus`:
@@ -125,14 +125,14 @@ CLI-опрос по одной ONU.
 Пример:
 
 ```bash
-curl "http://127.0.0.1:8000/onucli?olt_ip=10.5.0.21&board_id=1&pon_id=1&onu_id=125&access=telnet"
+curl "http://127.0.0.1:8000/onucli?olt_ip=10.5.0.21&port=gpon-olt_1/1/1&onu_id=125&access=telnet"
 ```
 
 Параметры:
-- все параметры `/onu`
+- `olt_ip`, `port` и `onu_id` обязательные
 - `access` со значениями `ssh` или `telnet`
 
-Для ZTE CLI внутри адаптера по-прежнему используется интерфейс вида `gpon-onu_1/<board>/<pon>:<onu>` после нормализации port-данных.
+Для ZTE CLI внутри адаптера используется интерфейс вида `gpon-onu_<shelf>/<slot>/<port>:<onu>`.
 
 ### `/cache/invalidate`
 
@@ -143,6 +143,8 @@ curl "http://127.0.0.1:8000/onucli?olt_ip=10.5.0.21&board_id=1&pon_id=1&onu_id=1
 ```bash
 curl -X DELETE "http://127.0.0.1:8000/cache/invalidate?olt_ip=10.5.0.21&board_id=1&pon_id=1"
 curl -X DELETE "http://127.0.0.1:8000/cache/invalidate?olt_ip=10.5.0.21&board_id=1&pon_id=1&onu_id=125"
+curl -X DELETE "http://127.0.0.1:8000/cache/invalidate?olt_ip=10.5.0.21&port=gpon-olt_1/1/1"
+curl -X DELETE "http://127.0.0.1:8000/cache/invalidate?olt_ip=10.5.0.21&port=gpon-olt_1/1/1&onu_id=125"
 ```
 
 ### `/cache/clear`
@@ -230,7 +232,7 @@ CLI реализован только внутри vendor adapter для ZTE.
 - при недоступном Redis сервис не падает, просто работает без кеша;
 - `nocache=true` отключает чтение из кеша, но после успешного запроса значение все равно перезаписывается в кеш;
 - ключи включают vendor, а для `/onucli` еще и тип доступа;
-- для `/onup` и `/onudebug` ключ включает `port`.
+- для `/onup`, `/onudebug`, `/onus`, `/onus-new` и `/onucli` ключ включает `port`.
 
 ## Environment Variables
 
@@ -450,6 +452,6 @@ python3 -m py_compile app/core/*.py app/services/*.py app/vendors/zte/*.py app/i
 
 ## Notes
 
-- `pon_id` обязателен, потому что и SNMP OID, и CLI interface naming зависят от пары `board_id + pon_id`.
+- `/onu` использует `board_id + pon_id`; новые port-based endpoints используют `port` вида `gpon-olt_<shelf>/<slot>/<port>` или `<shelf>/<slot>/<port>`.
 - `onu` и `onucli` возвращают согласованную верхнеуровневую структуру, но `onucli` всегда содержит `cli_details`, а `onu` содержит их только при fallback.
 - В debug-логах полезно различать количество интерфейсов Zabbix и количество уникальных `hostid`: для выбора vendor используется именно уникальный хост.

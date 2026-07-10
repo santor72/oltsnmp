@@ -142,8 +142,11 @@ class ZTEAdapter:
             cli_outputs=[ONUDebugCLIOutput(command=command, output=outputs.get(command, "")) for command in commands],
         )
 
-    async def get_onus(self, olt_ip: str, board_id: int, pon_id: int) -> list[ONUInfoPerBoard]:
-        board_oids = generate_board_pon_oids(board_id, pon_id)
+    async def get_onus(self, olt_ip: str, port: str) -> list[ONUInfoPerBoard]:
+        port_spec = parse_onup_port(port)
+        board_oids = generate_onup_oids(
+            port_spec.port_type, port_spec.shelf_id, port_spec.slot_id, port_spec.port_id
+        )
         walked = await self.snmp_client.walk(olt_ip, f"{BASE_OID_1}{board_oids.onu_id_name_oid}")
         items: list[ONUInfoPerBoard] = []
 
@@ -159,8 +162,8 @@ class ZTEAdapter:
                 f"{BASE_OID_1}{board_oids.onu_status_oid}.{onu_id}",
             ]
             onu_info = ONUInfoPerBoard(
-                board=board_id,
-                pon=pon_id,
+                board=port_spec.slot_id,
+                pon=port_spec.port_id,
                 onu_id=onu_id,
                 name=extract_name(_normalize_snmp_value(raw_name)),
             )
@@ -176,8 +179,11 @@ class ZTEAdapter:
             items.append(onu_info)
         return sorted(items, key=lambda item: item.onu_id)
 
-    async def get_onus_new(self, olt_ip: str, board_id: int, pon_id: int) -> list[ONUInfoPerBoard]:
-        board_oids = generate_board_pon_oids(board_id, pon_id)
+    async def get_onus_new(self, olt_ip: str, port: str) -> list[ONUInfoPerBoard]:
+        port_spec = parse_onup_port(port)
+        board_oids = generate_onup_oids(
+            port_spec.port_type, port_spec.shelf_id, port_spec.slot_id, port_spec.port_id
+        )
         name_rows = await self.snmp_client.walk(olt_ip, f"{BASE_OID_1}{board_oids.onu_id_name_oid}")
         type_rows = await self.snmp_client.walk(olt_ip, f"{BASE_OID_2}{board_oids.onu_type_oid}")
         serial_rows = await self.snmp_client.walk(olt_ip, f"{BASE_OID_1}{board_oids.onu_serial_number_oid}")
@@ -191,8 +197,8 @@ class ZTEAdapter:
                 continue
             onu_id = int(onu_id_str)
             items[onu_id] = ONUInfoPerBoard(
-                board=board_id,
-                pon=pon_id,
+                board=port_spec.slot_id,
+                pon=port_spec.port_id,
                 onu_id=onu_id,
                 name=extract_name(_normalize_snmp_value(raw_name)),
             )
@@ -251,14 +257,32 @@ class ZTEAdapter:
         if self.cli_transport is None:
             raise RuntimeError("CLI client is not configured")
         port_spec = parse_onup_port(query.port)
-        return await self.get_onu_cli(
-            ONUQuery(
-                olt_ip=query.olt_ip,
-                board_id=port_spec.slot_id,
-                pon_id=port_spec.port_id,
-                onu_id=query.onu_id,
-            ),
-            access=access,
+        onu_prefix = port_spec.port_type.removesuffix("-olt") + "-onu"
+        pon_family = port_spec.port_type.removesuffix("-olt")
+        onu_interface = (
+            f"{onu_prefix}_{port_spec.shelf_id}/{port_spec.slot_id}/{port_spec.port_id}:{query.onu_id}"
+        )
+        olt_interface = f"{port_spec.port_type}_{port_spec.shelf_id}/{port_spec.slot_id}/{port_spec.port_id}"
+        commands = [
+            f"show pon onu information {onu_interface}",
+            f"show pon power olt-rx {onu_interface}",
+            f"show pon power onu-rx {onu_interface}",
+            f"show {pon_family} onu state {olt_interface} {query.onu_id}",
+            f"show {pon_family} remote-onu interface eth {onu_interface}",
+            f"show {pon_family} remote-onu model {onu_interface}",
+        ]
+        outputs = await self.cli_transport.run_commands(query.olt_ip, commands, access)
+        return parse_onu_cli_outputs(
+            board_id=port_spec.slot_id,
+            pon_id=port_spec.port_id,
+            onu_id=query.onu_id,
+            olt_timezone=self.olt_timezone,
+            info_output=outputs[commands[0]],
+            olt_rx_output=outputs[commands[1]],
+            onu_rx_output=outputs[commands[2]],
+            state_output=outputs[commands[3]],
+            eth_output=outputs[commands[4]],
+            model_output=outputs[commands[5]],
         )
 
     async def _get_onup_detail(self, query: ONUPortQuery, debug: bool = False) -> tuple[ONUCustomerInfo, list[tuple[str, str]]]:

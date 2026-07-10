@@ -14,10 +14,10 @@ class FakeProvider:
     async def get_onu(self, query):  # pragma: no cover
         raise NotImplementedError
 
-    async def get_onus(self, olt_ip, board_id, pon_id):  # pragma: no cover
+    async def get_onus(self, olt_ip, port):  # pragma: no cover
         raise NotImplementedError
 
-    async def get_onus_new(self, olt_ip, board_id, pon_id):  # pragma: no cover
+    async def get_onus_new(self, olt_ip, port):  # pragma: no cover
         raise NotImplementedError
 
     async def get_onu_cli(self, query, access):  # pragma: no cover

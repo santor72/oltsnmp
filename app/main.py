@@ -139,19 +139,16 @@ async def invalidate_cache(
 
         keys: list[str] = []
         if board_id is not None and pon_id is not None:
-            keys.extend(
-                [
-                    cache.key("onus", resolved_vendor, olt_ip, board_id, pon_id),
-                    cache.key("onus-new", resolved_vendor, olt_ip, board_id, pon_id),
-                ]
-            )
             if onu_id is not None:
                 keys.append(cache.key("onu", resolved_vendor, olt_ip, board_id, pon_id, onu_id))
-                keys.append(cache.key("onucli", resolved_vendor, "ssh", olt_ip, board_id, pon_id, onu_id))
-                keys.append(cache.key("onucli", resolved_vendor, "telnet", olt_ip, board_id, pon_id, onu_id))
-        if port is not None and onu_id is not None:
-            keys.append(cache.key("onup", resolved_vendor, olt_ip, port, onu_id))
-            keys.append(cache.key("onudebug", resolved_vendor, olt_ip, port, onu_id))
+        if port is not None:
+            keys.append(cache.key("onus", resolved_vendor, olt_ip, port))
+            keys.append(cache.key("onus-new", resolved_vendor, olt_ip, port))
+            if onu_id is not None:
+                keys.append(cache.key("onup", resolved_vendor, olt_ip, port, onu_id))
+                keys.append(cache.key("onudebug", resolved_vendor, olt_ip, port, onu_id))
+                keys.append(cache.key("onucli", resolved_vendor, "ssh", olt_ip, port, onu_id))
+                keys.append(cache.key("onucli", resolved_vendor, "telnet", olt_ip, port, onu_id))
 
         deleted = 0
         for key in keys:
@@ -276,8 +273,7 @@ async def get_onu_debug(
 async def get_onus(
     response: Response,
     olt_ip: str = Query(..., description="OLT IP address"),
-    board_id: int = Query(..., ge=1, le=30),
-    pon_id: int = Query(..., ge=1, le=16),
+    port: str = Query(..., description="OLT port identifier, e.g. gpon-olt_1/1/1 or 1/1/1"),
     nocache: bool = Query(False, description="Bypass cache read and refresh cached value"),
     debug: bool = Query(False, description="Include vendor resolution debug headers"),
     vendor: str | None = Query(None, description="Equipment vendor override"),
@@ -287,12 +283,12 @@ async def get_onus(
         resolution = await resolver.resolve_details(olt_ip, vendor)
         resolved_vendor = resolution.resolved_vendor
         _apply_vendor_debug_headers(response, debug, resolution)
-        cache_key = cache.key("onus", resolved_vendor, olt_ip, board_id, pon_id)
+        cache_key = cache.key("onus", resolved_vendor, olt_ip, port)
         if not nocache:
             cached = await _cache_get(cache, cache_key)
             if cached is not None:
                 return ONU_INFO_LIST_ADAPTER.validate_python(cached)
-        result = await service.get_onus(olt_ip=olt_ip, board_id=board_id, pon_id=pon_id, vendor=resolved_vendor)
+        result = await service.get_onus(olt_ip=olt_ip, port=port, vendor=resolved_vendor)
         await _cache_set(cache, cache_key, [item.model_dump() for item in result], settings.cache_ttl_onus)
         return result
     except ValueError as exc:
@@ -305,8 +301,7 @@ async def get_onus(
 async def get_onus_new(
     response: Response,
     olt_ip: str = Query(..., description="OLT IP address"),
-    board_id: int = Query(..., ge=1, le=30),
-    pon_id: int = Query(..., ge=1, le=16),
+    port: str = Query(..., description="OLT port identifier, e.g. gpon-olt_1/1/1 or 1/1/1"),
     nocache: bool = Query(False, description="Bypass cache read and refresh cached value"),
     debug: bool = Query(False, description="Include vendor resolution debug headers"),
     vendor: str | None = Query(None, description="Equipment vendor override"),
@@ -316,12 +311,12 @@ async def get_onus_new(
         resolution = await resolver.resolve_details(olt_ip, vendor)
         resolved_vendor = resolution.resolved_vendor
         _apply_vendor_debug_headers(response, debug, resolution)
-        cache_key = cache.key("onus-new", resolved_vendor, olt_ip, board_id, pon_id)
+        cache_key = cache.key("onus-new", resolved_vendor, olt_ip, port)
         if not nocache:
             cached = await _cache_get(cache, cache_key)
             if cached is not None:
                 return ONU_INFO_LIST_ADAPTER.validate_python(cached)
-        result = await service.get_onus_new(olt_ip=olt_ip, board_id=board_id, pon_id=pon_id, vendor=resolved_vendor)
+        result = await service.get_onus_new(olt_ip=olt_ip, port=port, vendor=resolved_vendor)
         await _cache_set(cache, cache_key, [item.model_dump() for item in result], settings.cache_ttl_onus_new)
         return result
     except ValueError as exc:
@@ -334,8 +329,7 @@ async def get_onus_new(
 async def get_onu_cli(
     response: Response,
     olt_ip: str = Query(..., description="OLT IP address"),
-    board_id: int = Query(..., ge=1, le=30),
-    pon_id: int = Query(..., ge=1, le=16),
+    port: str = Query(..., description="OLT port identifier, e.g. gpon-olt_1/1/1 or 1/1/1"),
     onu_id: int = Query(..., ge=1),
     access: Literal["ssh", "telnet"] = Query("ssh", description="CLI transport"),
     nocache: bool = Query(False, description="Bypass cache read and refresh cached value"),
@@ -347,13 +341,13 @@ async def get_onu_cli(
         resolution = await resolver.resolve_details(olt_ip, vendor)
         resolved_vendor = resolution.resolved_vendor
         _apply_vendor_debug_headers(response, debug, resolution)
-        cache_key = cache.key("onucli", resolved_vendor, access, olt_ip, board_id, pon_id, onu_id)
+        cache_key = cache.key("onucli", resolved_vendor, access, olt_ip, port, onu_id)
         if not nocache:
             cached = await _cache_get(cache, cache_key)
             if cached is not None:
                 return ONUCLIInfo.model_validate(cached)
-        result = await service.get_onu_cli(
-            ONUQuery(olt_ip=olt_ip, board_id=board_id, pon_id=pon_id, onu_id=onu_id),
+        result = await service.get_onup_cli(
+            ONUPortQuery(olt_ip=olt_ip, port=port, onu_id=onu_id),
             access=access,
             vendor=resolved_vendor,
         )

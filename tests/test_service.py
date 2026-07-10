@@ -7,10 +7,14 @@ from app.vendors.zte.adapter import ZTEAdapter, is_timeout_error
 
 
 class FakeSNMPClient:
+    def __init__(self) -> None:
+        self.walk_oids: list[str] = []
+
     async def get(self, host: str, oid: str) -> object:
         return b"unused"
 
     async def walk(self, host: str, oid: str) -> list[tuple[str, object]]:
+        self.walk_oids.append(oid)
         return [
             (f"{oid}.2", b"onu-b"),
             (f"{oid}.1", b"onu-a"),
@@ -27,12 +31,16 @@ class FakeSNMPClient:
 
 
 class ONUDetailServiceListTest(unittest.IsolatedAsyncioTestCase):
-    async def test_get_by_board_and_pon_sorts_and_maps(self) -> None:
-        service = ZTEAdapter(FakeSNMPClient(), "Asia/Jakarta")
+    async def test_get_by_port_sorts_and_maps(self) -> None:
+        snmp = FakeSNMPClient()
+        service = ZTEAdapter(snmp, "Asia/Jakarta")
 
-        got = await service.get_onus("10.0.0.1", 3, 1)
+        got = await service.get_onus("10.0.0.1", "gpon-olt_2/3/4")
 
         self.assertEqual([item.onu_id for item in got], [1, 2])
+        self.assertEqual(got[0].board, 3)
+        self.assertEqual(got[0].pon, 4)
+        self.assertIn(".500.10.2.3.3.1.2.285344516", snmp.walk_oids[0])
         self.assertEqual(got[0].name, "onu-a")
         self.assertEqual(got[0].onu_type, "type-1")
         self.assertEqual(got[0].serial_number, "SN1")
@@ -99,8 +107,12 @@ class FakeSNMPDetailClient:
 
 
 class FakeCLIClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, list[str], str]] = []
+
     async def run_commands(self, host: str, commands: list[str], access: str) -> dict[str, str]:
         assert access in {"ssh", "telnet"}
+        self.calls.append((host, commands, access))
         return {
             commands[0]: """ONU interface:                  gpon-onu_1/1/1:125
 Auth information:               sn(GPON1D94C835)
@@ -167,10 +179,10 @@ class FakeONUDebugCLIClient:
 
 
 class ONUDetailServiceWalkListTest(unittest.IsolatedAsyncioTestCase):
-    async def test_get_by_board_and_pon_new_merges_walk_tables(self) -> None:
+    async def test_get_by_port_new_merges_walk_tables(self) -> None:
         service = ZTEAdapter(FakeSNMPWalkClient(), "Asia/Jakarta")
 
-        got = await service.get_onus_new("10.0.0.1", 1, 5)
+        got = await service.get_onus_new("10.0.0.1", "1/1/5")
 
         self.assertEqual([item.onu_id for item in got], [1, 2])
         self.assertEqual(got[0].name, "onu-a")
@@ -234,6 +246,20 @@ class ONUDetailServiceDetailTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(got.rx_power, "-22.292")
         self.assertEqual(got.status, "working")
         self.assertEqual(got.cli_details.phase_state, "working")
+
+    async def test_get_by_port_onu_cli_preserves_shelf_slot_and_port(self) -> None:
+        cli = FakeCLIClient()
+        service = ZTEAdapter(FakeSNMPDetailClient(), "Asia/Jakarta", cli_transport=cli)
+
+        got = await service.get_onup_cli(
+            ONUPortQuery(olt_ip="10.0.0.1", port="gpon-olt_2/3/4", onu_id=125),
+            access="telnet",
+        )
+
+        self.assertEqual(got.board, 3)
+        self.assertEqual(got.pon, 4)
+        self.assertIn("gpon-onu_2/3/4:125", cli.calls[0][1][0])
+        self.assertIn("gpon-olt_2/3/4", cli.calls[0][1][3])
 
     async def test_timeout_on_port_name_get_is_runtime_error(self) -> None:
         service = ZTEAdapter(FakeSNMPTimeoutClient(), "Asia/Jakarta")

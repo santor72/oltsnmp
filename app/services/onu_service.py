@@ -33,14 +33,18 @@ class OnuService:
         provider = self.registry.get(vendor).provider
         return await provider.get_onu_debug(query)
 
-    async def get_onus(self, olt_ip: str, board_id: int, pon_id: int, vendor: str | None = None) -> list[ONUInfoPerBoard]:
+    async def get_onus(self, olt_ip: str, port: str, vendor: str | None = None) -> list[ONUInfoPerBoard]:
         provider = self.registry.get(vendor).provider
-        return await provider.get_onus(olt_ip, board_id, pon_id)
+        return await provider.get_onus(olt_ip, port)
 
-    async def get_onus_new(self, olt_ip: str, board_id: int, pon_id: int, vendor: str | None = None) -> list[ONUInfoPerBoard]:
+    async def get_onus_new(self, olt_ip: str, port: str, vendor: str | None = None) -> list[ONUInfoPerBoard]:
         provider = self.registry.get(vendor).provider
-        return await provider.get_onus_new(olt_ip, board_id, pon_id)
+        return await provider.get_onus_new(olt_ip, port)
 
     async def get_onu_cli(self, query: ONUQuery, access: str, vendor: str | None = None) -> ONUCLIInfo:
         provider = self.registry.get(vendor).provider
         return await provider.get_onu_cli(query, access)
+
+    async def get_onup_cli(self, query: ONUPortQuery, access: str, vendor: str | None = None) -> ONUCLIInfo:
+        provider = self.registry.get(vendor).provider
+        return await provider.get_onup_cli(query, access)
