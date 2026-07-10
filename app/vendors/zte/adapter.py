@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from app.models import ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery, ONUPortQuery
+from typing import Callable
+
+from app.models import ONUCLIInfo, ONUCustomerInfo, ONUDebugCLIOutput, ONUDebugInfo, ONUDebugOIDOutput, ONUInfoPerBoard, ONUQuery, ONUPortQuery
 from app.snmp_client import SNMPClient
 from app.transformers import (
     convert_byte_array_to_datetime,
@@ -41,6 +43,12 @@ def _normalize_snmp_value(value: object) -> object:
         return bytes(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return str(value)
+
+
+def _onup_missing_default(field: str) -> str:
+    if field in {"rx_power", "olt_rx_power", "tx_power", "gpon_optical_distance"}:
+        return "0"
+    return ""
 
 
 class ZTEAdapter:
@@ -114,59 +122,25 @@ class ZTEAdapter:
         return detail
 
     async def get_onup(self, query: ONUPortQuery) -> ONUCustomerInfo:
-        port_spec = parse_onup_port(query.port)
-        oids = generate_onup_oids(port_spec.port_type, port_spec.shelf_id, port_spec.slot_id, port_spec.port_id)
-        name_oid = f"{BASE_OID_1}{oids.onu_id_name_oid}.{query.onu_id}"
-
-        try:
-            raw_name = await self.snmp_client.get(query.olt_ip, name_oid)
-        except Exception as exc:
-            if is_timeout_error(exc):
-                raise RuntimeError(str(exc)) from exc
-            raise LookupError(f"ONU not found for port={query.port}, onu_id={query.onu_id}") from exc
-
-        detail = ONUCustomerInfo(
-            board=port_spec.slot_id,
-            pon=port_spec.port_id,
-            onu_id=query.onu_id,
-            name=extract_name(_normalize_snmp_value(raw_name)),
-        )
-        detail.onu_type = extract_name(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_2}{oids.onu_type_oid}.{query.onu_id}"))
-        )
-        detail.serial_number = extract_serial_number(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_serial_number_oid}.{query.onu_id}"))
-        )
-        detail.rx_power = convert_power(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_rx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}"))
-        )
-        detail.olt_rx_power = convert_olt_rx_power(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.olt_rx_power_oid}.{query.onu_id}"))
-        )
-        detail.tx_power = convert_power(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_2}{oids.onu_tx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}"))
-        )
-        detail.status = extract_status(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_status_oid}.{query.onu_id}"))
-        )
-        detail.description = extract_name(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_description_oid}.{query.onu_id}"))
-        )
-        detail.last_online = convert_byte_array_to_datetime(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_last_online_oid}.{query.onu_id}"))
-        )
-        detail.last_offline = convert_byte_array_to_datetime(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_last_offline_oid}.{query.onu_id}"))
-        )
-        detail.uptime = get_uptime_duration(detail.last_online, self.olt_timezone)
-        detail.last_down_time_duration = get_last_down_duration(detail.last_offline, detail.last_online)
-        detail.offline_reason = extract_last_offline_reason(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_last_offline_reason_oid}.{query.onu_id}"))
-        )
-        detail.gpon_optical_distance = extract_gpon_optical_distance(
-            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_gpon_optical_distance_oid}.{query.onu_id}"))
-        )
+        detail, _ = await self._get_onup_detail(query)
         return detail
+
+    async def get_onu_debug(self, query: ONUPortQuery) -> ONUDebugInfo:
+        if self.cli_transport is None:
+            raise RuntimeError("CLI client is not configured")
+        detail, snmp_oids = await self._get_onup_detail(query, debug=True)
+        port_spec = parse_onup_port(query.port)
+        onu_interface = f"gpon-onu_{port_spec.shelf_id}/{port_spec.slot_id}/{port_spec.port_id}:{query.onu_id}"
+        commands = [
+            f"sh gpon onu detail-info {onu_interface}",
+            f"sh pon power attenuation {onu_interface}",
+        ]
+        outputs = await self.cli_transport.run_commands(query.olt_ip, commands, self.default_cli_fallback_access)
+        return ONUDebugInfo(
+            onu=detail,
+            snmp_oids=[ONUDebugOIDOutput(field=field, oid=oid) for field, oid in snmp_oids],
+            cli_outputs=[ONUDebugCLIOutput(command=command, output=outputs.get(command, "")) for command in commands],
+        )
 
     async def get_onus(self, olt_ip: str, board_id: int, pon_id: int) -> list[ONUInfoPerBoard]:
         board_oids = generate_board_pon_oids(board_id, pon_id)
@@ -286,3 +260,125 @@ class ZTEAdapter:
             ),
             access=access,
         )
+
+    async def _get_onup_detail(self, query: ONUPortQuery, debug: bool = False) -> tuple[ONUCustomerInfo, list[tuple[str, str]]]:
+        port_spec = parse_onup_port(query.port)
+        oids = generate_onup_oids(port_spec.port_type, port_spec.shelf_id, port_spec.slot_id, port_spec.port_id)
+        name_oid = f"{BASE_OID_1}{oids.onu_id_name_oid}.{query.onu_id}"
+        snmp_oids = [
+            ("name", name_oid),
+            ("onu_type", f"{BASE_OID_2}{oids.onu_type_oid}.{query.onu_id}"),
+            ("serial_number", f"{BASE_OID_1}{oids.onu_serial_number_oid}.{query.onu_id}"),
+            ("rx_power", f"{BASE_OID_1}{oids.onu_rx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}"),
+            ("olt_rx_power", f"{BASE_OID_1}{oids.olt_rx_power_oid}.{query.onu_id}"),
+            ("tx_power", f"{BASE_OID_2}{oids.onu_tx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}"),
+            ("status", f"{BASE_OID_1}{oids.onu_status_oid}.{query.onu_id}"),
+            ("description", f"{BASE_OID_1}{oids.onu_description_oid}.{query.onu_id}"),
+            ("last_online", f"{BASE_OID_1}{oids.onu_last_online_oid}.{query.onu_id}"),
+            ("last_offline", f"{BASE_OID_1}{oids.onu_last_offline_oid}.{query.onu_id}"),
+            ("offline_reason", f"{BASE_OID_1}{oids.onu_last_offline_reason_oid}.{query.onu_id}"),
+            ("gpon_optical_distance", f"{BASE_OID_1}{oids.onu_gpon_optical_distance_oid}.{query.onu_id}"),
+        ]
+
+        try:
+            raw_name = await self.snmp_client.get(query.olt_ip, name_oid)
+        except Exception as exc:
+            if is_timeout_error(exc):
+                raise RuntimeError(str(exc)) from exc
+            raise LookupError(f"ONU not found for port={query.port}, onu_id={query.onu_id}") from exc
+
+        detail = ONUCustomerInfo(
+            board=port_spec.slot_id,
+            pon=port_spec.port_id,
+            onu_id=query.onu_id,
+            name=extract_name(_normalize_snmp_value(raw_name)),
+        )
+        detail.onu_type = await self._onup_fetch_string(query, "onu_type", f"{BASE_OID_2}{oids.onu_type_oid}.{query.onu_id}")
+        detail.serial_number = await self._onup_fetch_string(query, "serial_number", f"{BASE_OID_1}{oids.onu_serial_number_oid}.{query.onu_id}", extract_serial_number)
+        detail.rx_power = await self._onup_fetch_number(query, "rx_power", f"{BASE_OID_1}{oids.onu_rx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}", convert_power)
+        detail.olt_rx_power = await self._onup_fetch_number(query, "olt_rx_power", f"{BASE_OID_1}{oids.olt_rx_power_oid}.{query.onu_id}", convert_olt_rx_power)
+        detail.tx_power = await self._onup_fetch_optional_number(
+            query,
+            "tx_power",
+            f"{BASE_OID_2}{oids.onu_tx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}",
+            convert_power,
+        )
+        detail.status = await self._onup_fetch_number(query, "status", f"{BASE_OID_1}{oids.onu_status_oid}.{query.onu_id}", extract_status)
+        detail.description = await self._onup_fetch_string(query, "description", f"{BASE_OID_1}{oids.onu_description_oid}.{query.onu_id}")
+        detail.last_online = await self._onup_fetch_optional_datetime(query, "last_online", f"{BASE_OID_1}{oids.onu_last_online_oid}.{query.onu_id}")
+        detail.last_offline = await self._onup_fetch_optional_datetime(query, "last_offline", f"{BASE_OID_1}{oids.onu_last_offline_oid}.{query.onu_id}")
+        detail.uptime = get_uptime_duration(detail.last_online, self.olt_timezone)
+        detail.last_down_time_duration = get_last_down_duration(detail.last_offline, detail.last_online)
+        detail.offline_reason = await self._onup_fetch_number(query, "offline_reason", f"{BASE_OID_1}{oids.onu_last_offline_reason_oid}.{query.onu_id}", extract_last_offline_reason)
+        detail.gpon_optical_distance = await self._onup_fetch_number(query, "gpon_optical_distance", f"{BASE_OID_1}{oids.onu_gpon_optical_distance_oid}.{query.onu_id}", extract_gpon_optical_distance)
+        return detail, snmp_oids
+
+    async def _onup_get_raw(self, query: ONUPortQuery, field: str, oid: str) -> object:
+        try:
+            return await self.snmp_client.get(query.olt_ip, oid)
+        except Exception as exc:
+            if is_timeout_error(exc):
+                raise RuntimeError(f"onup {field} timeout for port={query.port} oid={oid}: {exc}") from exc
+            raise RuntimeError(f"onup {field} fetch failed for port={query.port} oid={oid}: {exc}") from exc
+
+    async def _onup_fetch_string(
+        self,
+        query: ONUPortQuery,
+        field: str,
+        oid: str,
+        converter: Callable[[object], str] = extract_name,
+    ) -> str:
+        raw_value = await self._onup_get_raw(query, field, oid)
+        try:
+            return converter(_normalize_snmp_value(raw_value))
+        except Exception as exc:
+            raise RuntimeError(
+                f"onup {field} conversion failed for port={query.port} oid={oid} raw={raw_value!r}: {exc}"
+            ) from exc
+
+    async def _onup_fetch_number(
+        self,
+        query: ONUPortQuery,
+        field: str,
+        oid: str,
+        converter: Callable[[object], str],
+        missing_default: str | None = None,
+    ) -> str:
+        raw_value = await self._onup_get_raw(query, field, oid)
+        try:
+            return converter(_normalize_snmp_value(raw_value))
+        except Exception as exc:
+            raw_text = repr(raw_value)
+            if "NoSuchInstance" in raw_text or "NoSuchObject" in raw_text:
+                return _onup_missing_default(field) if missing_default is None else missing_default
+            raise RuntimeError(
+                f"onup {field} conversion failed for port={query.port} oid={oid} raw={raw_value!r}: {exc}"
+            ) from exc
+
+    async def _onup_fetch_optional_number(
+        self,
+        query: ONUPortQuery,
+        field: str,
+        oid: str,
+        converter: Callable[[object], str],
+    ) -> str:
+        raw_value = await self._onup_get_raw(query, field, oid)
+        raw_text = repr(raw_value)
+        if "NoSuchInstance" in raw_text or "NoSuchObject" in raw_text:
+            return _onup_missing_default(field)
+        try:
+            return converter(_normalize_snmp_value(raw_value))
+        except Exception as exc:
+            raise RuntimeError(
+                f"onup {field} conversion failed for port={query.port} oid={oid} raw={raw_value!r}: {exc}"
+            ) from exc
+
+    async def _onup_fetch_optional_datetime(self, query: ONUPortQuery, field: str, oid: str) -> str:
+        raw_value = await self._onup_get_raw(query, field, oid)
+        raw_text = repr(raw_value)
+        if "NoSuchInstance" in raw_text or "NoSuchObject" in raw_text:
+            return ""
+        try:
+            return convert_byte_array_to_datetime(_normalize_snmp_value(raw_value))
+        except Exception:
+            return ""

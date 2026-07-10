@@ -95,17 +95,20 @@ def generate_onup_oids(port_type: str, shelf_id: int, slot_id: int, port_id: int
             raise ValueError(f"invalid {label}: {value} (must be 1-{MAX_IFINDEX_BYTE})")
 
     onu_id_suffix = (0x11 << 24) | (shelf_id << 16) | (slot_id << 8) | port_id
-    onu_type_suffix = (0x10 << 24) | (shelf_id << 16) | (slot_id << 8) | port_id
+    onu_type_suffix = (0x10 << 24) | (shelf_id << 16) | (slot_id << 8)
 
     return BoardPonOID(
         onu_id_name_oid=f"{ONU_ID_NAME_PREFIX}.{onu_id_suffix}",
-        onu_type_oid=f"{ONU_TYPE_PREFIX}.{onu_type_suffix}",
+        #was onu_type
+        onu_type_oid=f"{ONU_TYPE_PREFIX}.{onu_id_suffix}",
         onu_serial_number_oid=f"{ONU_SERIAL_NUMBER_PREFIX}.{onu_id_suffix}",
         onu_rx_power_oid=f"{ONU_RX_POWER_PREFIX}.{onu_id_suffix}",
         olt_rx_power_oid=f"{OLT_RX_POWER_PREFIX}.{onu_id_suffix}",
-        onu_tx_power_oid=f"{ONU_TX_POWER_PREFIX}.{onu_type_suffix}",
+        #was onu_type
+        onu_tx_power_oid=f"{ONU_TX_POWER_PREFIX}.{onu_id_suffix}",
         onu_status_oid=f"{ONU_STATUS_PREFIX}.{onu_id_suffix}",
-        onu_ip_address_oid=f"{ONU_IP_ADDRESS_PREFIX}.{onu_type_suffix}",
+        #was onu_type
+        onu_ip_address_oid=f"{ONU_IP_ADDRESS_PREFIX}.{onu_id_suffix}",
         onu_description_oid=f"{ONU_DESCRIPTION_PREFIX}.{onu_id_suffix}",
         onu_last_online_oid=f"{ONU_LAST_ONLINE_PREFIX}.{onu_id_suffix}",
         onu_last_offline_oid=f"{ONU_LAST_OFFLINE_PREFIX}.{onu_id_suffix}",

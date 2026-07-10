@@ -94,6 +94,22 @@ class ONUCLIInfo(BaseModel):
     cli_details: ONUCLIDetails
 
 
+class ONUDebugCLIOutput(BaseModel):
+    command: str
+    output: str
+
+
+class ONUDebugOIDOutput(BaseModel):
+    field: str
+    oid: str
+
+
+class ONUDebugInfo(BaseModel):
+    onu: ONUCustomerInfo
+    snmp_oids: list[ONUDebugOIDOutput]
+    cli_outputs: list[ONUDebugCLIOutput]
+
+
 class CacheInvalidateResult(BaseModel):
     deleted: int
     keys: list[str]

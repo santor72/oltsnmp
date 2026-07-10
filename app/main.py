@@ -13,7 +13,7 @@ from app.core.vendor_resolver import VendorResolver
 from app.inventory.chain import InventoryChain
 from app.inventory.snmp_platform import SNMPPlatformInventory
 from app.inventory.zabbix import ZabbixInventory
-from app.models import CacheInvalidateResult, ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery, ONUPortQuery
+from app.models import CacheInvalidateResult, ONUCLIInfo, ONUCustomerInfo, ONUDebugInfo, ONUInfoPerBoard, ONUQuery, ONUPortQuery
 from app.services.onu_service import OnuService
 from app.snmp_client import SNMPClient
 from app.vendors.zte.adapter import ZTEAdapter
@@ -100,6 +100,16 @@ async def _cache_set(cache: CacheClient, key: str, value: object, ttl_seconds: i
         return
 
 
+def _normalize_onudebug_cached_value(cached: object) -> object:
+    if isinstance(cached, dict):
+        normalized = dict(cached)
+        normalized.setdefault("snmp_oids", [])
+        normalized.setdefault("cli_outputs", [])
+        normalized.setdefault("onu", {})
+        return normalized
+    return cached
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -141,6 +151,7 @@ async def invalidate_cache(
                 keys.append(cache.key("onucli", resolved_vendor, "telnet", olt_ip, board_id, pon_id, onu_id))
         if port is not None and onu_id is not None:
             keys.append(cache.key("onup", resolved_vendor, olt_ip, port, onu_id))
+            keys.append(cache.key("onudebug", resolved_vendor, olt_ip, port, onu_id))
 
         deleted = 0
         for key in keys:
@@ -219,6 +230,38 @@ async def get_onup(
                 return ONUCustomerInfo.model_validate(cached)
         query = ONUPortQuery(olt_ip=olt_ip, port=port, onu_id=onu_id)
         result = await service.get_onup(query, vendor=resolved_vendor)
+        await _cache_set(cache, cache_key, result.model_dump(), settings.cache_ttl_onu)
+        return result
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/onudebug", response_model=ONUDebugInfo)
+async def get_onu_debug(
+    response: Response,
+    olt_ip: str = Query(..., description="OLT IP address"),
+    port: str = Query(..., description="OLT port identifier, e.g. gpon-olt_1/1/1 or 1/1/1"),
+    onu_id: int = Query(..., ge=1),
+    nocache: bool = Query(False, description="Bypass cache read and refresh cached value"),
+    debug: bool = Query(False, description="Include vendor resolution debug headers"),
+    vendor: str | None = Query(None, description="Equipment vendor override"),
+) -> ONUDebugInfo:
+    try:
+        settings, service, cache, resolver = _build_dependencies()
+        resolution = await resolver.resolve_details(olt_ip, vendor)
+        resolved_vendor = resolution.resolved_vendor
+        _apply_vendor_debug_headers(response, debug, resolution)
+        cache_key = cache.key("onudebug", resolved_vendor, olt_ip, port, onu_id)
+        if not nocache:
+            cached = await _cache_get(cache, cache_key)
+            if cached is not None:
+                return ONUDebugInfo.model_validate(_normalize_onudebug_cached_value(cached))
+        query = ONUPortQuery(olt_ip=olt_ip, port=port, onu_id=onu_id)
+        result = await service.get_onu_debug(query, vendor=resolved_vendor)
         await _cache_set(cache, cache_key, result.model_dump(), settings.cache_ttl_onu)
         return result
     except LookupError as exc:

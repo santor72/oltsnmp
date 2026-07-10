@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from app.models import ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery, ONUPortQuery
+from app.models import ONUCLIInfo, ONUCustomerInfo, ONUDebugInfo, ONUInfoPerBoard, ONUQuery, ONUPortQuery
 
 
 class VendorProvider(Protocol):
@@ -15,6 +15,8 @@ class VendorProvider(Protocol):
     async def get_onu(self, query: ONUQuery) -> ONUCustomerInfo: ...
 
     async def get_onup(self, query: ONUPortQuery) -> ONUCustomerInfo: ...
+
+    async def get_onu_debug(self, query: ONUPortQuery) -> ONUDebugInfo: ...
 
     async def get_onus(self, olt_ip: str, board_id: int, pon_id: int) -> list[ONUInfoPerBoard]: ...
 

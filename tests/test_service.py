@@ -128,6 +128,44 @@ class FakeSNMPTimeoutClient:
         raise RuntimeError("Request timeout")
 
 
+class FakeSNMPDebugClient:
+    async def get(self, host: str, oid: str) -> object:
+        if ".500.10.2.3.3.1.2.285278730.46" in oid:
+            return b"onu-46"
+        if ".3.50.11.2.1.17." in oid:
+            return b"type-46"
+        if ".500.10.2.3.3.1.18.285278730.46" in oid:
+            return b"1,SN46"
+        if ".500.20.2.2.2.1.10.285278730.46.1" in oid:
+            return 1001
+        if ".500.1.2.4.2.1.2." in oid:
+            return 1002
+        if ".3.50.12.1.1.14." in oid:
+            return 1003
+        if ".500.10.2.3.8.1.4.285278730.46" in oid:
+            return 4
+        if ".500.10.2.3.3.1.3.285278730.46" in oid:
+            return b"desc-46"
+        if ".500.10.2.3.8.1.5.285278730.46" in oid:
+            return bytes([0x07, 0xE8, 0x01, 0x02, 0x03, 0x04, 0x05, 0x00])
+        if ".500.10.2.3.8.1.6.285278730.46" in oid:
+            return bytes([0x07, 0xE8, 0x01, 0x02, 0x01, 0x00, 0x00, 0x00])
+        if ".500.10.2.3.8.1.7.285278730.46" in oid:
+            return 9
+        if ".500.10.2.3.10.1.2.285278730.46" in oid:
+            return 1234
+        raise RuntimeError(f"unexpected oid {oid}")
+
+
+class FakeONUDebugCLIClient:
+    async def run_commands(self, host: str, commands: list[str], access: str) -> dict[str, str]:
+        assert access == "telnet"
+        return {
+            commands[0]: "detail-info output",
+            commands[1]: "attenuation output",
+        }
+
+
 class ONUDetailServiceWalkListTest(unittest.IsolatedAsyncioTestCase):
     async def test_get_by_board_and_pon_new_merges_walk_tables(self) -> None:
         service = ZTEAdapter(FakeSNMPWalkClient(), "Asia/Jakarta")
@@ -212,6 +250,26 @@ class ONUDetailServiceDetailTest(unittest.IsolatedAsyncioTestCase):
             await service.get_onu(
                 ONUQuery(olt_ip="10.0.0.1", board_id=1, pon_id=1, onu_id=125)
             )
+
+    async def test_get_onu_debug_returns_cli_outputs(self) -> None:
+        service = ZTEAdapter(FakeSNMPDebugClient(), "Asia/Jakarta", cli_transport=FakeONUDebugCLIClient())
+
+        got = await service.get_onu_debug(
+            ONUPortQuery(olt_ip="10.0.0.1", port="1/2/10", onu_id=46)
+        )
+
+        self.assertEqual(got.onu.onu_id, 46)
+        self.assertEqual(got.onu.name, "onu-46")
+        self.assertEqual(
+            got.snmp_oids[0],
+            type(got.snmp_oids[0])(field="name", oid=".1.3.6.1.4.1.3902.1082.500.10.2.3.3.1.2.285278730.46"),
+        )
+        self.assertIn("tx_power", {item.field for item in got.snmp_oids})
+        self.assertEqual([item.command for item in got.cli_outputs], [
+            "sh gpon onu detail-info gpon-onu_1/2/10:46",
+            "sh pon power attenuation gpon-onu_1/2/10:46",
+        ])
+        self.assertEqual(got.cli_outputs[0].output, "detail-info output")
 
 
 class TimeoutHelperTest(unittest.TestCase):
