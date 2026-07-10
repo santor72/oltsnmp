@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from app.models import ONUQuery
+from app.models import ONUQuery, ONUPortQuery
 from app.vendors.zte.adapter import ZTEAdapter, is_timeout_error
 
 
@@ -169,6 +169,41 @@ class ONUDetailServiceDetailTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(got.rx_power, "-22.292")
         self.assertEqual(got.status, "working")
         self.assertEqual(got.cli_details.phase_state, "working")
+
+    async def test_get_by_port_onu_uses_direct_get_for_name_leaf(self) -> None:
+        service = ZTEAdapter(FakeSNMPDetailClient(), "Asia/Jakarta")
+
+        got = await service.get_onup(
+            ONUPortQuery(olt_ip="10.0.0.1", port="gpon-olt_1/1/1", onu_id=125)
+        )
+
+        self.assertEqual(got.onu_id, 125)
+        self.assertEqual(got.name, "onu-125")
+        self.assertEqual(got.onu_type, "type-125")
+        self.assertEqual(got.serial_number, "SN125")
+        self.assertEqual(got.olt_rx_power, "-25.304")
+
+    async def test_get_by_port_onu_cli(self) -> None:
+        service = ZTEAdapter(FakeSNMPDetailClient(), "Asia/Jakarta", cli_transport=FakeCLIClient())
+
+        got = await service.get_onup_cli(
+            ONUPortQuery(olt_ip="10.0.0.1", port="gpon-olt_1/1/1", onu_id=125),
+            access="telnet",
+        )
+
+        self.assertEqual(got.name, "gpon-onu_1/1/1:125")
+        self.assertEqual(got.olt_rx_power, "-25.304")
+        self.assertEqual(got.rx_power, "-22.292")
+        self.assertEqual(got.status, "working")
+        self.assertEqual(got.cli_details.phase_state, "working")
+
+    async def test_timeout_on_port_name_get_is_runtime_error(self) -> None:
+        service = ZTEAdapter(FakeSNMPTimeoutClient(), "Asia/Jakarta")
+
+        with self.assertRaises(RuntimeError):
+            await service.get_onup(
+                ONUPortQuery(olt_ip="10.0.0.1", port="gpon-olt_1/1/1", onu_id=125)
+            )
 
     async def test_timeout_on_name_get_is_runtime_error(self) -> None:
         service = ZTEAdapter(FakeSNMPTimeoutClient(), "Asia/Jakarta")

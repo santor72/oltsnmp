@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.models import ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery
+from app.models import ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery, ONUPortQuery
 from app.snmp_client import SNMPClient
 from app.transformers import (
     convert_byte_array_to_datetime,
@@ -17,7 +17,14 @@ from app.transformers import (
 )
 from app.vendors.zte.cli_parser import parse_onu_cli_outputs
 from app.vendors.zte.cli_transport import ZTECLITransport
-from app.vendors.zte.oid import BASE_OID_1, BASE_OID_2, SNMP_OID_SUFFIX, generate_board_pon_oids
+from app.vendors.zte.oid import (
+    BASE_OID_1,
+    BASE_OID_2,
+    SNMP_OID_SUFFIX,
+    generate_board_pon_oids,
+    generate_onup_oids,
+    parse_onup_port,
+)
 
 
 def is_timeout_error(exc: Exception | str) -> bool:
@@ -103,6 +110,61 @@ class ZTEAdapter:
         )
         detail.gpon_optical_distance = extract_gpon_optical_distance(
             _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{board_oids.onu_gpon_optical_distance_oid}.{query.onu_id}"))
+        )
+        return detail
+
+    async def get_onup(self, query: ONUPortQuery) -> ONUCustomerInfo:
+        port_spec = parse_onup_port(query.port)
+        oids = generate_onup_oids(port_spec.port_type, port_spec.shelf_id, port_spec.slot_id, port_spec.port_id)
+        name_oid = f"{BASE_OID_1}{oids.onu_id_name_oid}.{query.onu_id}"
+
+        try:
+            raw_name = await self.snmp_client.get(query.olt_ip, name_oid)
+        except Exception as exc:
+            if is_timeout_error(exc):
+                raise RuntimeError(str(exc)) from exc
+            raise LookupError(f"ONU not found for port={query.port}, onu_id={query.onu_id}") from exc
+
+        detail = ONUCustomerInfo(
+            board=port_spec.slot_id,
+            pon=port_spec.port_id,
+            onu_id=query.onu_id,
+            name=extract_name(_normalize_snmp_value(raw_name)),
+        )
+        detail.onu_type = extract_name(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_2}{oids.onu_type_oid}.{query.onu_id}"))
+        )
+        detail.serial_number = extract_serial_number(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_serial_number_oid}.{query.onu_id}"))
+        )
+        detail.rx_power = convert_power(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_rx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}"))
+        )
+        detail.olt_rx_power = convert_olt_rx_power(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.olt_rx_power_oid}.{query.onu_id}"))
+        )
+        detail.tx_power = convert_power(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_2}{oids.onu_tx_power_oid}.{query.onu_id}{SNMP_OID_SUFFIX}"))
+        )
+        detail.status = extract_status(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_status_oid}.{query.onu_id}"))
+        )
+        detail.description = extract_name(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_description_oid}.{query.onu_id}"))
+        )
+        detail.last_online = convert_byte_array_to_datetime(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_last_online_oid}.{query.onu_id}"))
+        )
+        detail.last_offline = convert_byte_array_to_datetime(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_last_offline_oid}.{query.onu_id}"))
+        )
+        detail.uptime = get_uptime_duration(detail.last_online, self.olt_timezone)
+        detail.last_down_time_duration = get_last_down_duration(detail.last_offline, detail.last_online)
+        detail.offline_reason = extract_last_offline_reason(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_last_offline_reason_oid}.{query.onu_id}"))
+        )
+        detail.gpon_optical_distance = extract_gpon_optical_distance(
+            _normalize_snmp_value(await self.snmp_client.get(query.olt_ip, f"{BASE_OID_1}{oids.onu_gpon_optical_distance_oid}.{query.onu_id}"))
         )
         return detail
 
@@ -209,4 +271,18 @@ class ZTEAdapter:
             state_output=outputs[commands[3]],
             eth_output=outputs[commands[4]],
             model_output=outputs[commands[5]],
+        )
+
+    async def get_onup_cli(self, query: ONUPortQuery, access: str) -> ONUCLIInfo:
+        if self.cli_transport is None:
+            raise RuntimeError("CLI client is not configured")
+        port_spec = parse_onup_port(query.port)
+        return await self.get_onu_cli(
+            ONUQuery(
+                olt_ip=query.olt_ip,
+                board_id=port_spec.slot_id,
+                pon_id=port_spec.port_id,
+                onu_id=query.onu_id,
+            ),
+            access=access,
         )

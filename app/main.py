@@ -13,7 +13,7 @@ from app.core.vendor_resolver import VendorResolver
 from app.inventory.chain import InventoryChain
 from app.inventory.snmp_platform import SNMPPlatformInventory
 from app.inventory.zabbix import ZabbixInventory
-from app.models import CacheInvalidateResult, ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery
+from app.models import CacheInvalidateResult, ONUCLIInfo, ONUCustomerInfo, ONUInfoPerBoard, ONUQuery, ONUPortQuery
 from app.services.onu_service import OnuService
 from app.snmp_client import SNMPClient
 from app.vendors.zte.adapter import ZTEAdapter
@@ -109,8 +109,9 @@ def health() -> dict[str, str]:
 async def invalidate_cache(
     response: Response,
     olt_ip: str = Query(..., description="OLT IP address"),
-    board_id: int = Query(..., ge=1, le=30),
-    pon_id: int = Query(..., ge=1, le=16),
+    board_id: int | None = Query(None, ge=1, le=30),
+    pon_id: int | None = Query(None, ge=1, le=16),
+    port: str | None = Query(None, description="OLT port identifier"),
     onu_id: int | None = Query(None, ge=1),
     debug: bool = Query(False, description="Include vendor resolution debug headers"),
     vendor: str | None = Query(None, description="Equipment vendor override"),
@@ -119,18 +120,27 @@ async def invalidate_cache(
         _, _, cache, resolver = _build_dependencies()
         if not cache.enabled():
             raise HTTPException(status_code=503, detail="Redis cache is not configured")
+        if board_id is None or pon_id is None:
+            if port is None:
+                raise HTTPException(status_code=400, detail="board_id and pon_id or port must be provided")
         resolution = await resolver.resolve_details(olt_ip, vendor)
         resolved_vendor = resolution.resolved_vendor
         _apply_vendor_debug_headers(response, debug, resolution)
 
-        keys = [
-            cache.key("onus", resolved_vendor, olt_ip, board_id, pon_id),
-            cache.key("onus-new", resolved_vendor, olt_ip, board_id, pon_id),
-        ]
-        if onu_id is not None:
-            keys.append(cache.key("onu", resolved_vendor, olt_ip, board_id, pon_id, onu_id))
-            keys.append(cache.key("onucli", resolved_vendor, "ssh", olt_ip, board_id, pon_id, onu_id))
-            keys.append(cache.key("onucli", resolved_vendor, "telnet", olt_ip, board_id, pon_id, onu_id))
+        keys: list[str] = []
+        if board_id is not None and pon_id is not None:
+            keys.extend(
+                [
+                    cache.key("onus", resolved_vendor, olt_ip, board_id, pon_id),
+                    cache.key("onus-new", resolved_vendor, olt_ip, board_id, pon_id),
+                ]
+            )
+            if onu_id is not None:
+                keys.append(cache.key("onu", resolved_vendor, olt_ip, board_id, pon_id, onu_id))
+                keys.append(cache.key("onucli", resolved_vendor, "ssh", olt_ip, board_id, pon_id, onu_id))
+                keys.append(cache.key("onucli", resolved_vendor, "telnet", olt_ip, board_id, pon_id, onu_id))
+        if port is not None and onu_id is not None:
+            keys.append(cache.key("onup", resolved_vendor, olt_ip, port, onu_id))
 
         deleted = 0
         for key in keys:
@@ -177,6 +187,38 @@ async def get_onu(
                 return ONUCustomerInfo.model_validate(cached)
         query = ONUQuery(olt_ip=olt_ip, board_id=board_id, pon_id=pon_id, onu_id=onu_id)
         result = await service.get_onu(query, vendor=resolved_vendor)
+        await _cache_set(cache, cache_key, result.model_dump(), settings.cache_ttl_onu)
+        return result
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/onup", response_model=ONUCustomerInfo)
+async def get_onup(
+    response: Response,
+    olt_ip: str = Query(..., description="OLT IP address"),
+    port: str = Query(..., description="OLT port identifier, e.g. gpon-olt_1/1/1 or 1/1/1"),
+    onu_id: int = Query(..., ge=1),
+    nocache: bool = Query(False, description="Bypass cache read and refresh cached value"),
+    debug: bool = Query(False, description="Include vendor resolution debug headers"),
+    vendor: str | None = Query(None, description="Equipment vendor override"),
+) -> ONUCustomerInfo:
+    try:
+        settings, service, cache, resolver = _build_dependencies()
+        resolution = await resolver.resolve_details(olt_ip, vendor)
+        resolved_vendor = resolution.resolved_vendor
+        _apply_vendor_debug_headers(response, debug, resolution)
+        cache_key = cache.key("onup", resolved_vendor, olt_ip, port, onu_id)
+        if not nocache:
+            cached = await _cache_get(cache, cache_key)
+            if cached is not None:
+                return ONUCustomerInfo.model_validate(cached)
+        query = ONUPortQuery(olt_ip=olt_ip, port=port, onu_id=onu_id)
+        result = await service.get_onup(query, vendor=resolved_vendor)
         await _cache_set(cache, cache_key, result.model_dump(), settings.cache_ttl_onu)
         return result
     except LookupError as exc:

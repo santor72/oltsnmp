@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 
 BASE_OID_1 = ".1.3.6.1.4.1.3902.1082"
@@ -49,6 +50,17 @@ class BoardPonOID:
     onu_gpon_optical_distance_oid: str
 
 
+@dataclass(frozen=True)
+class OnuPortSpec:
+    port_type: str
+    shelf_id: int
+    slot_id: int
+    port_id: int
+
+
+MAX_IFINDEX_BYTE = 255
+
+
 def generate_board_pon_oids(board_id: int, pon_id: int) -> BoardPonOID:
     if board_id < 1 or board_id > MAX_BOARD_ID:
         raise ValueError(f"invalid board_id: {board_id} (must be 1-{MAX_BOARD_ID})")
@@ -73,3 +85,50 @@ def generate_board_pon_oids(board_id: int, pon_id: int) -> BoardPonOID:
         onu_last_offline_reason_oid=f"{ONU_LAST_OFFLINE_REASON_PREFIX}.{onu_id_suffix}",
         onu_gpon_optical_distance_oid=f"{ONU_GPON_OPTICAL_DISTANCE_PREFIX}.{onu_id_suffix}",
     )
+
+
+def generate_onup_oids(port_type: str, shelf_id: int, slot_id: int, port_id: int) -> BoardPonOID:
+    if port_type.strip().lower() not in {"gpon-olt", "epon-olt"}:
+        raise ValueError(f"invalid port type: {port_type!r}")
+    for label, value in ("shelf_id", shelf_id), ("slot_id", slot_id), ("port_id", port_id):
+        if value < 1 or value > MAX_IFINDEX_BYTE:
+            raise ValueError(f"invalid {label}: {value} (must be 1-{MAX_IFINDEX_BYTE})")
+
+    onu_id_suffix = (0x11 << 24) | (shelf_id << 16) | (slot_id << 8) | port_id
+    onu_type_suffix = (0x10 << 24) | (shelf_id << 16) | (slot_id << 8) | port_id
+
+    return BoardPonOID(
+        onu_id_name_oid=f"{ONU_ID_NAME_PREFIX}.{onu_id_suffix}",
+        onu_type_oid=f"{ONU_TYPE_PREFIX}.{onu_type_suffix}",
+        onu_serial_number_oid=f"{ONU_SERIAL_NUMBER_PREFIX}.{onu_id_suffix}",
+        onu_rx_power_oid=f"{ONU_RX_POWER_PREFIX}.{onu_id_suffix}",
+        olt_rx_power_oid=f"{OLT_RX_POWER_PREFIX}.{onu_id_suffix}",
+        onu_tx_power_oid=f"{ONU_TX_POWER_PREFIX}.{onu_type_suffix}",
+        onu_status_oid=f"{ONU_STATUS_PREFIX}.{onu_id_suffix}",
+        onu_ip_address_oid=f"{ONU_IP_ADDRESS_PREFIX}.{onu_type_suffix}",
+        onu_description_oid=f"{ONU_DESCRIPTION_PREFIX}.{onu_id_suffix}",
+        onu_last_online_oid=f"{ONU_LAST_ONLINE_PREFIX}.{onu_id_suffix}",
+        onu_last_offline_oid=f"{ONU_LAST_OFFLINE_PREFIX}.{onu_id_suffix}",
+        onu_last_offline_reason_oid=f"{ONU_LAST_OFFLINE_REASON_PREFIX}.{onu_id_suffix}",
+        onu_gpon_optical_distance_oid=f"{ONU_GPON_OPTICAL_DISTANCE_PREFIX}.{onu_id_suffix}",
+    )
+
+
+def parse_onup_port(port: str) -> OnuPortSpec:
+    value = port.strip()
+    if not value:
+        raise ValueError("invalid port: empty value")
+
+    match = re.fullmatch(r"(?:(?P<port_type>[a-z0-9-]+)_)?(?P<shelf_id>\d+)/(?P<slot_id>\d+)/(?P<port_id>\d+)", value)
+    if not match:
+        raise ValueError(f"invalid port: {port!r} (expected [gpon-olt_] <shelf>/<slot>/<port>)")
+
+    port_type = (match.group("port_type") or "gpon-olt").strip().lower()
+    if not port_type.endswith("-olt"):
+        raise ValueError(f"invalid port: {port!r} (expected *-olt_<shelf>/<slot>/<port>)")
+
+    shelf_id = int(match.group("shelf_id"))
+    slot_id = int(match.group("slot_id"))
+    port_id = int(match.group("port_id"))
+    generate_onup_oids(port_type, shelf_id, slot_id, port_id)
+    return OnuPortSpec(port_type=port_type, shelf_id=shelf_id, slot_id=slot_id, port_id=port_id)

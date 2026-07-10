@@ -56,6 +56,12 @@ class ONUQuery(BaseModel):
     onu_id: int
 
 
+class ONUPortQuery(BaseModel):
+    olt_ip: str
+    port: str
+    onu_id: int
+
+
 class ONUInfoPerBoard(BaseModel):
     board: int
     pon: int
